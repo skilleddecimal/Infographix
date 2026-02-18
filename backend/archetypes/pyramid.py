@@ -44,6 +44,16 @@ from ..engine.units import (
 )
 from ..engine.text_measure import fit_text_to_width
 
+# Learned styles from template analysis
+try:
+    from ..engine.learned_styles import (
+        generate_creative_pyramid_style,
+        CreativeStyleGenerator,
+    )
+    LEARNED_STYLES_AVAILABLE = True
+except ImportError:
+    LEARNED_STYLES_AVAILABLE = False
+
 
 # =============================================================================
 # PYRAMID CONFIGURATION
@@ -59,11 +69,11 @@ class PyramidDirection(Enum):
 class PyramidConfig:
     """Configuration options for pyramid layout."""
     direction: PyramidDirection = PyramidDirection.UPWARD
-    level_gutter: float = GUTTER_V * 0.5    # Gap between levels
+    level_gutter: float = 0.0                # No gap - shapes touch for seamless pyramid
     base_width_ratio: float = 0.85           # Base width as ratio of content width
     top_width_ratio: float = 0.25            # Top width as ratio of content width
-    min_level_height: float = 0.6            # Minimum height for each level
-    max_level_height: float = 1.2            # Maximum height for each level
+    min_level_height: float = 0.8            # Minimum height for each level
+    max_level_height: float = 1.4            # Maximum height for each level
     show_3d_effect: bool = False             # Add 3D shading effect
 
 
@@ -111,12 +121,28 @@ class PyramidArchetype(BaseArchetype):
         if input_data.palette:
             self.palette = input_data.palette
 
+        # Count levels for style generation
+        level_data = self._get_level_data(input_data)
+        num_levels = len(level_data)
+
+        # Generate learned style if available
+        self.learned_style = None
+        if LEARNED_STYLES_AVAILABLE:
+            # Get brand hint from metadata if available
+            brand_hint = input_data.metadata.get("brand_hint", "") if input_data.metadata else ""
+            self.learned_style = generate_creative_pyramid_style(
+                num_levels=num_levels,
+                title=input_data.title or "",
+                brand_hint=brand_hint,
+            )
+
         layout = PositionedLayout(
             slide_width_inches=SLIDE_WIDTH_INCHES,
             slide_height_inches=SLIDE_HEIGHT_INCHES,
             background_color=self.palette.background,
             elements=[],
-            connectors=[]
+            connectors=[],
+            archetype="pyramid"  # Set archetype for renderer style selection
         )
 
         title_elem, subtitle_elem = self.create_title_element(
@@ -134,9 +160,9 @@ class PyramidArchetype(BaseArchetype):
 
         content_height = CONTENT_HEIGHT - (content_top - CONTENT_TOP)
 
-        # Create pyramid levels
+        # Create pyramid levels - use layers if available, otherwise use blocks
         elements = self._create_pyramid_levels(
-            input_data.blocks,
+            input_data,
             content_top,
             content_height
         )
@@ -146,17 +172,24 @@ class PyramidArchetype(BaseArchetype):
 
     def _create_pyramid_levels(
         self,
-        blocks: List[BlockData],
+        input_data: DiagramInput,
         content_top: float,
         content_height: float
     ) -> List[PositionedElement]:
-        """Create the pyramid level elements."""
+        """Create the pyramid level elements.
+
+        If layers are defined, creates one level per layer.
+        Otherwise, creates one level per block.
+        """
         elements = []
 
-        if not blocks:
+        # Build level data - either from layers or blocks
+        level_data = self._get_level_data(input_data)
+
+        if not level_data:
             return elements
 
-        num_levels = len(blocks)
+        num_levels = len(level_data)
 
         # Calculate level heights
         total_gutter = self.config.level_gutter * (num_levels - 1)
@@ -174,49 +207,76 @@ class PyramidArchetype(BaseArchetype):
         top_width = CONTENT_WIDTH * self.config.top_width_ratio
         width_step = (base_width - top_width) / (num_levels - 1) if num_levels > 1 else 0
 
-        # Determine order based on pyramid direction
-        if self.config.direction == PyramidDirection.UPWARD:
-            # Traditional: base at bottom, apex at top
-            # First block = top (apex), last block = bottom (base)
-            # OR we can interpret first block as base
-            # Let's use: first block = base (bottom), last block = apex (top)
-            level_order = list(range(num_levels - 1, -1, -1))  # Draw from bottom up
-        else:
-            # Inverted: wide at top, narrow at bottom
-            level_order = list(range(num_levels))  # Draw from top down
-
-        # Create levels
-        for draw_idx, block_idx in enumerate(level_order):
-            block = blocks[block_idx]
-
-            # Position based on direction
+        # Create levels - level 0 is base (bottom, widest), last level is apex (top, narrowest)
+        for level_idx, level_info in enumerate(level_data):
             if self.config.direction == PyramidDirection.UPWARD:
-                # Bottom to top: draw_idx 0 is at bottom
-                y = start_y + (num_levels - 1 - draw_idx) * (level_height + self.config.level_gutter)
-                # Width decreases as we go up (draw_idx increases)
-                level_width = base_width - (draw_idx * width_step)
+                # Traditional pyramid: base at bottom
+                # level_idx 0 = base = bottom of screen (highest y) = widest
+                # level_idx n-1 = apex = top of screen (lowest y) = narrowest
+                y = start_y + (num_levels - 1 - level_idx) * (level_height + self.config.level_gutter)
+                level_width = base_width - (level_idx * width_step)
             else:
-                # Top to bottom: draw_idx 0 is at top
-                y = start_y + draw_idx * (level_height + self.config.level_gutter)
-                # Width decreases as we go down
-                level_width = base_width - (draw_idx * width_step)
+                # Inverted pyramid: base at top
+                y = start_y + level_idx * (level_height + self.config.level_gutter)
+                level_width = base_width - (level_idx * width_step)
 
             # Center horizontally
             x = CONTENT_LEFT + (CONTENT_WIDTH - level_width) / 2
 
             # Create level element
             element = self._create_level_element(
-                block,
+                level_info,
                 x,
                 y,
                 level_width,
                 level_height,
-                block_idx,
+                level_idx,
                 num_levels
             )
             elements.append(element)
 
         return elements
+
+    def _get_level_data(self, input_data: DiagramInput) -> List[BlockData]:
+        """Extract level data from input.
+
+        If layers are defined, merges entity labels within each layer.
+        Otherwise, treats each block as a separate level.
+        """
+        # If no layers defined, use blocks directly
+        if not input_data.layers:
+            return input_data.blocks
+
+        # Build block lookup
+        block_map = {b.id: b for b in input_data.blocks}
+
+        # Create one level per layer
+        levels = []
+        for layer in input_data.layers:
+            # Get all blocks in this layer
+            layer_blocks = [block_map[bid] for bid in layer.blocks if bid in block_map]
+
+            if not layer_blocks:
+                # No blocks in layer, use layer label
+                levels.append(BlockData(
+                    id=layer.id,
+                    label=layer.label,
+                    description="",
+                ))
+            elif len(layer_blocks) == 1:
+                # Single block - use its label
+                levels.append(layer_blocks[0])
+            else:
+                # Multiple blocks - combine labels
+                combined_label = " / ".join(b.label for b in layer_blocks)
+                levels.append(BlockData(
+                    id=layer.id,
+                    label=combined_label,
+                    description=layer.label,
+                    color=layer_blocks[0].color,  # Use first block's color
+                ))
+
+        return levels
 
     def _create_level_element(
         self,
@@ -229,8 +289,16 @@ class PyramidArchetype(BaseArchetype):
         total_levels: int
     ) -> PositionedElement:
         """Create a single pyramid level element."""
-        # Color progression: use different colors for each level
-        fill_color = block.color or self.palette.get_color_for_index(level_idx)
+        # Use learned colors if available, otherwise fall back to palette
+        if self.learned_style and "level_colors" in self.learned_style:
+            # Learned colors are ordered base to apex
+            learned_colors = self.learned_style["level_colors"]
+            if level_idx < len(learned_colors):
+                fill_color = block.color or learned_colors[level_idx]
+            else:
+                fill_color = block.color or self.palette.get_color_for_index(level_idx)
+        else:
+            fill_color = block.color or self.palette.get_color_for_index(level_idx)
 
         # Fit text
         fit_result = fit_text_to_width(
@@ -244,7 +312,16 @@ class PyramidArchetype(BaseArchetype):
             max_lines=2
         )
 
-        text_color = self._contrast_text_color(fill_color)
+        # Use learned text color or compute contrast
+        if self.learned_style:
+            # Use the learned text color based on background luminance
+            generator = CreativeStyleGenerator() if LEARNED_STYLES_AVAILABLE else None
+            if generator:
+                text_color = generator.get_text_color_for_background(fill_color)
+            else:
+                text_color = self._contrast_text_color(fill_color)
+        else:
+            text_color = self._contrast_text_color(fill_color)
 
         level_text = PositionedText(
             content=block.label,
@@ -256,16 +333,25 @@ class PyramidArchetype(BaseArchetype):
             alignment=TextAlignment.CENTER
         )
 
+        # Determine stroke based on learned style
+        if self.learned_style:
+            use_stroke = self.learned_style.get("use_stroke", False)
+            stroke_color = self.learned_style.get("stroke_color") if use_stroke else None
+            stroke_width = self.learned_style.get("stroke_width_pt", 0) if use_stroke else 0
+        else:
+            stroke_color = self.palette.border
+            stroke_width = 1.0
+
         return PositionedElement(
-            id=block.id,
+            id=f"level_{level_idx}",  # Standardized format for renderer to parse level index
             element_type=ElementType.BLOCK,
             x_inches=x,
             y_inches=y,
             width_inches=width,
             height_inches=height,
             fill_color=fill_color,
-            stroke_color=self.palette.border,
-            stroke_width_pt=1.0,
+            stroke_color=stroke_color,
+            stroke_width_pt=stroke_width,
             corner_radius_inches=0.04,
             text=level_text,
             z_order=10 + level_idx  # Higher levels on top
@@ -275,10 +361,13 @@ class PyramidArchetype(BaseArchetype):
         """Validate input for pyramid layout."""
         errors = super().validate_input(input_data)
 
-        if len(input_data.blocks) < 2:
+        # Count levels: use layers if defined, otherwise blocks
+        num_levels = len(input_data.layers) if input_data.layers else len(input_data.blocks)
+
+        if num_levels < 2:
             errors.append("Pyramid requires at least 2 levels")
 
-        if len(input_data.blocks) > 7:
+        if num_levels > 7:
             errors.append("Too many levels for pyramid (max 7)")
 
         return errors

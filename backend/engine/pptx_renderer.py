@@ -1001,7 +1001,6 @@ class PPTXRenderer:
             pyramid_shape = ShapeGenerator.create_pyramid_segment(
                 level=level_idx,
                 total_levels=total_levels,
-                taper_ratio=0.12
             )
 
         # Fill color
