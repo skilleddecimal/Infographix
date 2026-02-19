@@ -23,6 +23,7 @@ from .positioned import (
     ElementType,
     ConnectorStyle,
     TextAlignment,
+    MultiSlidePresentation,
 )
 
 from .text_measure import (
@@ -45,12 +46,105 @@ from .layout_engine import (
     ArchetypeType,
     create_layout,
     quick_layout,
+    # New universal system convenience functions
+    create_funnel,
+    create_pyramid,
+    create_process_flow,
+    create_comparison,
+    create_hub_spoke,
+    create_timeline,
+    create_composition,
+    learn_archetype_from_pptx,
+    list_all_archetypes,
 )
+
+# Universal Archetype System
+from .archetype_rules import (
+    ArchetypeRules,
+    ElementTemplate,
+    ConnectorTemplate,
+    LayoutConstraint,
+    OverlaySpec,
+    OverlayElement,
+    CompositionLayout,
+    DiagramRegion,
+    # Enums
+    LayoutStrategy,
+    LayoutDirection,
+    ElementShape,
+    PositionRule,
+    SizeRule,
+    ColorRule,
+    ConnectorPattern,
+    OverlayType,
+    OverlayPosition,
+)
+
+from .universal_archetype import UniversalArchetype
+
+from .archetype_resolver import (
+    ArchetypeResolver,
+    get_resolver,
+    resolve_archetype,
+    list_archetypes,
+)
+
+from .archetype_learner import (
+    ArchetypeLearner,
+    LearnedArchetypeResult,
+)
+
+from .multi_diagram_composer import (
+    MultiDiagramComposer,
+    RegionLayout,
+    compose_diagrams,
+    REGION_LAYOUTS,
+)
+
+from .overlay_system import OverlayEngine
 
 from .pptx_renderer import (
     PPTXRenderer,
     render_to_pptx,
     render_to_bytes,
+    render_styled,
+    render_presentation_to_pptx,
+    render_presentation_to_bytes,
+    create_presentation_from_layouts,
+    # Visual effect types
+    ShapeType,
+    ShadowEffect,
+    GradientEffect,
+    VisualStyle,
+    # Style presets
+    STYLE_FLAT,
+    STYLE_SUBTLE_3D,
+    STYLE_PROFESSIONAL,
+    STYLE_EXECUTIVE,
+    STYLE_PYRAMID_LEVEL,
+    SHADOW_SUBTLE,
+    SHADOW_MEDIUM,
+    SHADOW_STRONG,
+    GRADIENT_SUBTLE_3D,
+    GRADIENT_GLASS,
+    # Utility
+    apply_visual_effects_to_shape,
+    lighten_color,
+    darken_color,
+)
+
+from .design_learner import (
+    StyleDatabase,
+    PPTAnalyzer,
+    ImageAnalyzer,
+    DesignStyle,
+    ColorPaletteExtended,
+    ShapeStyle,
+    TypographyStyle,
+    LayoutStyle,
+    ShadowStyle,
+    GradientStyle,
+    GradientStop,
 )
 
 from .svg_renderer import (
@@ -77,12 +171,24 @@ from .llm_reasoning import (
     EntityBrief,
     LayerBrief,
     ConnectionBrief,
+    SlideBrief,
     analyze_prompt,
     analyze_prompt_sync,
     validate_brief,
     enhance_brief,
     brief_to_dict,
     dict_to_brief,
+)
+
+from .template_library import (
+    DiagramTemplate,
+    TemplateCategory,
+    get_template,
+    list_templates,
+    get_categories,
+    get_popular_tags,
+    create_brief_from_template,
+    TEMPLATE_LIBRARY,
 )
 
 __all__ = [
@@ -105,6 +211,7 @@ __all__ = [
     'ElementType',
     'ConnectorStyle',
     'TextAlignment',
+    'MultiSlidePresentation',
     # Text measurement
     'fit_text_to_width',
     'measure_text',
@@ -121,10 +228,83 @@ __all__ = [
     'ArchetypeType',
     'create_layout',
     'quick_layout',
+    'create_funnel',
+    'create_pyramid',
+    'create_process_flow',
+    'create_comparison',
+    'create_hub_spoke',
+    'create_timeline',
+    'create_composition',
+    'learn_archetype_from_pptx',
+    'list_all_archetypes',
+    # Universal Archetype System
+    'ArchetypeRules',
+    'ElementTemplate',
+    'ConnectorTemplate',
+    'LayoutConstraint',
+    'OverlaySpec',
+    'OverlayElement',
+    'CompositionLayout',
+    'DiagramRegion',
+    'LayoutStrategy',
+    'LayoutDirection',
+    'ElementShape',
+    'PositionRule',
+    'SizeRule',
+    'ColorRule',
+    'ConnectorPattern',
+    'OverlayType',
+    'OverlayPosition',
+    'UniversalArchetype',
+    'ArchetypeResolver',
+    'get_resolver',
+    'resolve_archetype',
+    'list_archetypes',
+    'ArchetypeLearner',
+    'LearnedArchetypeResult',
+    'MultiDiagramComposer',
+    'RegionLayout',
+    'compose_diagrams',
+    'REGION_LAYOUTS',
+    'OverlayEngine',
     # PPTX renderer
     'PPTXRenderer',
     'render_to_pptx',
     'render_to_bytes',
+    'render_styled',
+    'render_presentation_to_pptx',
+    'render_presentation_to_bytes',
+    'create_presentation_from_layouts',
+    # Visual effects
+    'ShapeType',
+    'ShadowEffect',
+    'GradientEffect',
+    'VisualStyle',
+    'STYLE_FLAT',
+    'STYLE_SUBTLE_3D',
+    'STYLE_PROFESSIONAL',
+    'STYLE_EXECUTIVE',
+    'STYLE_PYRAMID_LEVEL',
+    'SHADOW_SUBTLE',
+    'SHADOW_MEDIUM',
+    'SHADOW_STRONG',
+    'GRADIENT_SUBTLE_3D',
+    'GRADIENT_GLASS',
+    'apply_visual_effects_to_shape',
+    'lighten_color',
+    'darken_color',
+    # Design learner
+    'StyleDatabase',
+    'PPTAnalyzer',
+    'ImageAnalyzer',
+    'DesignStyle',
+    'ColorPaletteExtended',
+    'ShapeStyle',
+    'TypographyStyle',
+    'LayoutStyle',
+    'ShadowStyle',
+    'GradientStyle',
+    'GradientStop',
     # SVG renderer
     'SVGRenderer',
     'render_to_svg',
@@ -145,10 +325,20 @@ __all__ = [
     'EntityBrief',
     'LayerBrief',
     'ConnectionBrief',
+    'SlideBrief',
     'analyze_prompt',
     'analyze_prompt_sync',
     'validate_brief',
     'enhance_brief',
     'brief_to_dict',
     'dict_to_brief',
+    # Template library
+    'DiagramTemplate',
+    'TemplateCategory',
+    'get_template',
+    'list_templates',
+    'get_categories',
+    'get_popular_tags',
+    'create_brief_from_template',
+    'TEMPLATE_LIBRARY',
 ]

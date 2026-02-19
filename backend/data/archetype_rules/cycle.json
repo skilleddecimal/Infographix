@@ -1,0 +1,43 @@
+{
+  "archetype_id": "circular_cycle",
+  "display_name": "Circular Cycle",
+  "description": "Items arranged in a circle with arrows showing continuous flow",
+  "layout_strategy": "radial",
+  "primary_direction": "radial",
+  "element_template": {
+    "element_type": "rounded_rect",
+    "position_rule": "radial_even",
+    "size_rule": "uniform",
+    "size_params": {
+      "fixed_width": 1.6,
+      "fixed_height": 1.0
+    },
+    "color_rule": "palette_sequence",
+    "corner_radius": 0.08,
+    "stroke_width": 1.0,
+    "text_alignment": "center",
+    "bold_label": true
+  },
+  "connector_template": {
+    "pattern": "cycle",
+    "style": "arrow",
+    "routing": "curved",
+    "stroke_width": 1.5
+  },
+  "supports_overlays": true,
+  "radial_params": {
+    "center_element": false,
+    "radius_ratio": 0.35,
+    "start_angle": 270,
+    "rotation": "clockwise"
+  },
+  "min_elements": 3,
+  "max_elements": 8,
+  "category": "cycle",
+  "keywords": ["cycle", "circular", "loop", "continuous", "repeating", "iterative"],
+  "example_prompts": [
+    "PDCA cycle (Plan-Do-Check-Act)",
+    "Agile sprint cycle",
+    "Customer lifecycle"
+  ]
+}
