@@ -8,7 +8,7 @@ All coordinates are in INCHES (converted to EMU/pixels at render time).
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from enum import Enum
 
 
@@ -30,6 +30,34 @@ class ConnectorStyle(Enum):
     BIDIRECTIONAL = "bidirectional"  # Arrowheads at both ends
     DASHED = "dashed"         # Dashed line with arrow
     PLAIN = "plain"           # No arrowhead
+
+
+class RoutingStyle(Enum):
+    """Connector routing styles for smart connectors."""
+    DIRECT = "direct"         # Straight line between points
+    ORTHOGONAL = "orthogonal" # Right-angle routing (horizontal/vertical only)
+    CURVED = "curved"         # Smooth bezier curve
+    STEPPED = "stepped"       # Single step (L-shaped)
+
+
+class AnchorPosition(Enum):
+    """Anchor positions on element edges for connectors."""
+    TOP = "top"
+    BOTTOM = "bottom"
+    LEFT = "left"
+    RIGHT = "right"
+    CENTER = "center"
+    AUTO = "auto"             # Automatically determine best anchor
+
+
+class IconPosition(Enum):
+    """Icon position within an element."""
+    LEFT = "left"             # Icon on left, text on right
+    RIGHT = "right"           # Icon on right, text on left
+    TOP = "top"               # Icon above text
+    BOTTOM = "bottom"         # Icon below text
+    CENTER = "center"         # Icon centered (text may overlay or be below)
+    BACKGROUND = "background" # Icon as background watermark
 
 
 class TextAlignment(Enum):
@@ -83,6 +111,15 @@ class PositionedElement:
     opacity: float = 1.0                   # 0.0 to 1.0
     layer_id: Optional[str] = None         # Which layer this belongs to
     z_order: int = 0                       # Lower = rendered first (behind)
+    shape_hint: Optional[str] = None       # Shape type hint: "trapezoid", "arrow", "chevron", etc.
+    arrow_direction: Optional[str] = None  # For arrows: "up", "down", "left", "right"
+    custom_path: Optional[List] = None     # For freeform shapes: list of path segments from learned shapes
+
+    # Icon fields (Phase 1: Icon System)
+    icon_id: Optional[str] = None          # Icon identifier from icon library (e.g., "database", "cloud")
+    icon_position: IconPosition = IconPosition.LEFT  # Where to place icon relative to text
+    icon_size_ratio: float = 0.4           # Icon size as ratio of element height (0.0 to 1.0)
+    icon_color: Optional[str] = None       # Icon fill color (None = use text color)
 
     @property
     def right_edge(self) -> float:
@@ -124,6 +161,23 @@ class PositionedConnector:
     from_element_id: Optional[str] = None  # Source element ID
     to_element_id: Optional[str] = None    # Target element ID
 
+    # Smart connector routing fields (Phase 2: Smart Connectors)
+    waypoints: List[Tuple[float, float]] = field(default_factory=list)  # Intermediate points for polyline routing
+    routing_style: RoutingStyle = RoutingStyle.DIRECT  # How to route the connector
+    from_anchor: AnchorPosition = AnchorPosition.AUTO  # Where connector leaves source element
+    to_anchor: AnchorPosition = AnchorPosition.AUTO    # Where connector enters target element
+    corner_radius_inches: float = 0.05     # Rounding radius for orthogonal corners
+
+    @property
+    def is_polyline(self) -> bool:
+        """Whether this connector has intermediate waypoints."""
+        return len(self.waypoints) > 0
+
+    @property
+    def all_points(self) -> List[Tuple[float, float]]:
+        """Get all points including start, waypoints, and end."""
+        return [(self.start_x, self.start_y)] + self.waypoints + [(self.end_x, self.end_y)]
+
     @property
     def midpoint_x(self) -> float:
         """X-coordinate of connector midpoint."""
@@ -144,7 +198,7 @@ class PositionedConnector:
 @dataclass
 class PositionedLayout:
     """
-    Complete render-ready layout.
+    Complete render-ready layout for a single slide.
 
     This is the output of the layout engine and the input to renderers.
     Contains all elements with absolute positions — renderers just plot them.
@@ -156,6 +210,10 @@ class PositionedLayout:
     connectors: List[PositionedConnector] = field(default_factory=list)
     title: Optional[PositionedElement] = None
     subtitle: Optional[PositionedElement] = None
+    slide_number: int = 1  # 1-indexed slide number
+    slide_id: Optional[str] = None  # Unique identifier for the slide
+    speaker_notes: Optional[str] = None  # Speaker notes for this slide
+    archetype: Optional[str] = None  # Archetype used (e.g., "pyramid", "marketecture")
 
     def get_element_by_id(self, element_id: str) -> Optional[PositionedElement]:
         """Find an element by its ID."""
@@ -203,3 +261,115 @@ class PositionedLayout:
             e1.bottom_edge <= e2.y_inches or
             e2.bottom_edge <= e1.y_inches
         )
+
+
+@dataclass
+class MultiSlidePresentation:
+    """
+    A multi-slide presentation containing multiple PositionedLayout slides.
+
+    This is the container for multi-slide PPTX generation.
+    """
+    slides: List[PositionedLayout] = field(default_factory=list)
+    presentation_title: str = "Presentation"
+    author: Optional[str] = None
+    created_at: Optional[str] = None  # ISO format timestamp
+    metadata: dict = field(default_factory=dict)
+
+    @property
+    def slide_count(self) -> int:
+        """Total number of slides."""
+        return len(self.slides)
+
+    @property
+    def slide_width_inches(self) -> float:
+        """Width from first slide (all slides should be same size)."""
+        if self.slides:
+            return self.slides[0].slide_width_inches
+        return 13.333  # Default 16:9
+
+    @property
+    def slide_height_inches(self) -> float:
+        """Height from first slide (all slides should be same size)."""
+        if self.slides:
+            return self.slides[0].slide_height_inches
+        return 7.5  # Default 16:9
+
+    def add_slide(self, slide: PositionedLayout) -> None:
+        """Add a slide to the presentation."""
+        slide.slide_number = len(self.slides) + 1
+        if not slide.slide_id:
+            slide.slide_id = f"slide_{slide.slide_number}"
+        self.slides.append(slide)
+
+    def get_slide(self, index: int) -> Optional[PositionedLayout]:
+        """Get slide by index (0-based)."""
+        if 0 <= index < len(self.slides):
+            return self.slides[index]
+        return None
+
+    def get_slide_by_id(self, slide_id: str) -> Optional[PositionedLayout]:
+        """Get slide by its ID."""
+        for slide in self.slides:
+            if slide.slide_id == slide_id:
+                return slide
+        return None
+
+    def reorder_slides(self, new_order: List[int]) -> None:
+        """Reorder slides by providing new indices."""
+        if len(new_order) != len(self.slides):
+            raise ValueError("New order must include all slides")
+        if set(new_order) != set(range(len(self.slides))):
+            raise ValueError("Invalid slide indices")
+
+        self.slides = [self.slides[i] for i in new_order]
+        # Update slide numbers
+        for i, slide in enumerate(self.slides):
+            slide.slide_number = i + 1
+
+    def remove_slide(self, index: int) -> Optional[PositionedLayout]:
+        """Remove slide at index and return it."""
+        if 0 <= index < len(self.slides):
+            removed = self.slides.pop(index)
+            # Update remaining slide numbers
+            for i, slide in enumerate(self.slides):
+                slide.slide_number = i + 1
+            return removed
+        return None
+
+    def duplicate_slide(self, index: int) -> Optional[PositionedLayout]:
+        """Duplicate a slide and insert after the original."""
+        if 0 <= index < len(self.slides):
+            import copy
+            original = self.slides[index]
+            duplicate = copy.deepcopy(original)
+            duplicate.slide_id = f"{original.slide_id}_copy"
+            self.slides.insert(index + 1, duplicate)
+            # Update slide numbers
+            for i, slide in enumerate(self.slides):
+                slide.slide_number = i + 1
+            return duplicate
+        return None
+
+    def validate(self) -> List[str]:
+        """Validate all slides and return warnings."""
+        warnings = []
+
+        if not self.slides:
+            warnings.append("Presentation has no slides")
+            return warnings
+
+        # Check all slides have same dimensions
+        base_width = self.slides[0].slide_width_inches
+        base_height = self.slides[0].slide_height_inches
+        for i, slide in enumerate(self.slides):
+            if slide.slide_width_inches != base_width or slide.slide_height_inches != base_height:
+                warnings.append(f"Slide {i+1} has different dimensions than other slides")
+
+        # Validate each slide
+        for i, slide in enumerate(self.slides):
+            slide_warnings = slide.validate()
+            for w in slide_warnings:
+                warnings.append(f"Slide {i+1}: {w}")
+
+        return warnings
