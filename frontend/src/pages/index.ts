@@ -1,0 +1,6 @@
+export { Home } from './Home'
+export { Generate } from './Generate'
+export { Templates } from './Templates'
+export { Pricing } from './Pricing'
+export { Login } from './Login'
+export { Register } from './Register'
