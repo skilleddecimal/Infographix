@@ -103,7 +103,7 @@ class TestAuthRoutes:
             "/api/v1/auth/register",
             json={
                 "email": "new@example.com",
-                "password": "securepass123",
+                "password": "SecurePass123!",  # Strong password with uppercase, number, special char
                 "name": "New User",
             },
         )
@@ -118,7 +118,7 @@ class TestAuthRoutes:
             "/api/v1/auth/register",
             json={
                 "email": test_user.email,
-                "password": "password123",
+                "password": "SecurePass123!",  # Strong password
             },
         )
         assert response.status_code == 409

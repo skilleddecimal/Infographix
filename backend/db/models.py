@@ -456,3 +456,128 @@ class UsageRecord(Base):
 
     def __repr__(self) -> str:
         return f"<UsageRecord {self.action} by {self.user_id[:8]}>"
+
+
+class AuditLog(Base):
+    """Audit log model for Enterprise."""
+
+    __tablename__ = "audit_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Action
+    action = Column(String(100), nullable=False, index=True)
+
+    # Actor (who performed the action)
+    actor_id = Column(String(36), nullable=True, index=True)
+    actor_email = Column(String(255), nullable=True)
+
+    # Target (what was affected)
+    target_type = Column(String(50), nullable=True, index=True)
+    target_id = Column(String(36), nullable=True, index=True)
+
+    # Context
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+
+    # Additional details
+    details = Column(JSON, default=dict)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self) -> str:
+        return f"<AuditLog {self.action} by {self.actor_id}>"
+
+
+class WebhookEndpoint(Base):
+    """Webhook endpoint model for Enterprise."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # Endpoint configuration
+    url = Column(String(500), nullable=False)
+    secret_hash = Column(String(255), nullable=False)  # For HMAC signing
+    events = Column(JSON, default=list)  # List of event types
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    failure_count = Column(Integer, default=0)
+    last_success_at = Column(DateTime, nullable=True)
+    last_failure_at = Column(DateTime, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<WebhookEndpoint {self.url}>"
+
+
+class WebhookDelivery(Base):
+    """Webhook delivery record model."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    endpoint_id = Column(String(36), ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Event info
+    event_type = Column(String(100), nullable=False)
+    payload = Column(JSON, nullable=False)
+
+    # Delivery result
+    status_code = Column(Integer, nullable=True)
+    response_body = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    success = Column(Boolean, default=False)
+    retry_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    delivered_at = Column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<WebhookDelivery {self.event_type} to {self.endpoint_id}>"
+
+
+class OrganizationInvitation(Base):
+    """Organization invitation model."""
+
+    __tablename__ = "organization_invitations"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    invited_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Invitation details
+    email = Column(String(255), nullable=False)
+    role = Column(SQLEnum(MemberRole), default=MemberRole.VIEWER, nullable=False)
+    token_hash = Column(String(255), nullable=False, index=True)
+
+    # Status
+    status = Column(String(20), default="pending")  # pending, accepted, expired, cancelled
+
+    # Expiration
+    expires_at = Column(DateTime, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    accepted_at = Column(DateTime, nullable=True)
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint("organization_id", "email", name="unique_org_invitation"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrganizationInvitation {self.email} to {self.organization_id}>"
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if invitation is expired."""
+        return datetime.utcnow() > self.expires_at
