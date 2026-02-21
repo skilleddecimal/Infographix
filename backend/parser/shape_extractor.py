@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.text import PP_ALIGN
 from pptx.shapes.autoshape import Shape as PPTXAutoShape
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -20,15 +21,29 @@ from backend.dsl.schema import (
     TextRun,
     Transform,
 )
+from backend.parser.path_parser import PathParser
 from backend.parser.style_extractor import StyleExtractor
+from backend.parser.transform_parser import TransformParser
 
 
 class ShapeExtractor:
     """Extracts shapes from PPTX slides."""
 
+    # Map PP_ALIGN values to alignment strings
+    ALIGNMENT_MAP = {
+        PP_ALIGN.LEFT: "left",
+        PP_ALIGN.CENTER: "center",
+        PP_ALIGN.RIGHT: "right",
+        PP_ALIGN.JUSTIFY: "justify",
+        PP_ALIGN.JUSTIFY_LOW: "justify",
+        PP_ALIGN.DISTRIBUTE: "justify",
+    }
+
     def __init__(self) -> None:
         """Initialize the shape extractor."""
         self.style_extractor = StyleExtractor()
+        self.path_parser = PathParser()
+        self.transform_parser = TransformParser()
         self._z_index_counter = 0
 
     def extract_shapes(
@@ -130,7 +145,22 @@ class ShapeExtractor:
         if isinstance(pptx_shape, Picture):
             return ShapeType.IMAGE
 
-        shape_type = pptx_shape.shape_type
+        # Not all shapes have shape_type attribute
+        if not hasattr(pptx_shape, "shape_type"):
+            # Try to determine type from other attributes
+            if hasattr(pptx_shape, "has_text_frame") and pptx_shape.has_text_frame:
+                return ShapeType.TEXT
+            if hasattr(pptx_shape, "fill"):
+                return ShapeType.AUTO_SHAPE
+            return None
+
+        try:
+            shape_type = pptx_shape.shape_type
+        except Exception:
+            return ShapeType.AUTO_SHAPE  # Default to auto shape
+
+        if shape_type is None:
+            return ShapeType.AUTO_SHAPE
 
         if shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
             return ShapeType.AUTO_SHAPE
@@ -144,9 +174,11 @@ class ShapeExtractor:
             return ShapeType.GROUP
         if shape_type == MSO_SHAPE_TYPE.LINE:
             return ShapeType.CONNECTOR
+        if shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+            return ShapeType.TEXT
 
-        # Unsupported types
-        return None
+        # Default to auto shape for any other type
+        return ShapeType.AUTO_SHAPE
 
     def _generate_id(self, pptx_shape: BaseShape) -> str:
         """Generate a unique ID for a shape.
@@ -162,23 +194,16 @@ class ShapeExtractor:
     def _extract_transform(self, pptx_shape: BaseShape) -> Transform:
         """Extract transformation properties.
 
+        Uses TransformParser to extract rotation, flip_h, and flip_v
+        from the shape's XML.
+
         Args:
             pptx_shape: The python-pptx shape object.
 
         Returns:
-            Transform object.
+            Transform object with rotation and flip properties.
         """
-        rotation = 0.0
-        if hasattr(pptx_shape, "rotation"):
-            rotation = float(pptx_shape.rotation)
-
-        return Transform(
-            rotation=rotation,
-            flip_h=False,  # TODO: Extract from PPTX XML
-            flip_v=False,
-            scale_x=1.0,
-            scale_y=1.0,
-        )
+        return self.transform_parser.extract_transform(pptx_shape)
 
     def _extract_auto_shape(self, pptx_shape: BaseShape, shape_dict: dict[str, Any]) -> None:
         """Extract auto shape specific properties.
@@ -187,8 +212,13 @@ class ShapeExtractor:
             pptx_shape: The python-pptx shape object.
             shape_dict: Dictionary to populate with properties.
         """
-        if hasattr(pptx_shape, "auto_shape_type") and pptx_shape.auto_shape_type:
-            shape_dict["auto_shape_type"] = str(pptx_shape.auto_shape_type).split(".")[-1].lower()
+        # Try to get auto_shape_type - may raise ValueError for unsupported shapes like lines
+        try:
+            if hasattr(pptx_shape, "auto_shape_type") and pptx_shape.auto_shape_type:
+                shape_dict["auto_shape_type"] = str(pptx_shape.auto_shape_type).split(".")[-1].lower()
+        except ValueError:
+            # Some shapes (like lines with custom geometry) may not have a mappable auto_shape_type
+            pass
 
         # Extract fill
         if isinstance(pptx_shape, PPTXAutoShape):
@@ -204,18 +234,29 @@ class ShapeExtractor:
     def _extract_freeform(self, pptx_shape: BaseShape, shape_dict: dict[str, Any]) -> None:
         """Extract freeform path data.
 
+        Uses PathParser to extract Bezier path commands from the shape's
+        custom geometry XML.
+
         Args:
             pptx_shape: The python-pptx shape object.
             shape_dict: Dictionary to populate with properties.
         """
-        # TODO: Extract path commands from shape XML
-        shape_dict["path"] = []
+        # Extract path commands from shape XML using PathParser
+        shape_width = shape_dict["bbox"].width
+        shape_height = shape_dict["bbox"].height
+        path_commands = self.path_parser.extract_path_commands(
+            pptx_shape, shape_width, shape_height
+        )
+        shape_dict["path"] = path_commands
 
         # Extract fill and stroke
         if hasattr(pptx_shape, "fill"):
             shape_dict["fill"] = self.style_extractor.extract_fill(pptx_shape.fill)
         if hasattr(pptx_shape, "line") and pptx_shape.line:
             shape_dict["stroke"] = self.style_extractor.extract_stroke(pptx_shape.line)
+
+        # Extract effects for freeform shapes
+        shape_dict["effects"] = self.style_extractor.extract_effects(pptx_shape)
 
     def _extract_text_shape(self, pptx_shape: BaseShape, shape_dict: dict[str, Any]) -> None:
         """Extract text box properties.
@@ -262,32 +303,75 @@ class ShapeExtractor:
     def _extract_text_content(self, text_frame: Any) -> TextContent:
         """Extract formatted text content.
 
+        Extracts text runs with formatting and paragraph alignment.
+
         Args:
             text_frame: The python-pptx TextFrame object.
 
         Returns:
-            TextContent with formatted runs.
+            TextContent with formatted runs and alignment.
         """
         runs: list[TextRun] = []
+        alignment = "left"
 
-        for paragraph in text_frame.paragraphs:
-            for run in paragraph.runs:
-                font = run.font
-                text_run = TextRun(
-                    text=run.text,
-                    font_family=font.name or "Calibri",
-                    font_size=int(font.size.pt * 100) if font.size else 1400,
-                    bold=bool(font.bold),
-                    italic=bool(font.italic),
-                    underline=bool(font.underline),
-                    color=self._rgb_to_hex(font.color.rgb) if font.color and font.color.rgb else "#000000",
-                )
-                runs.append(text_run)
+        try:
+            for paragraph in text_frame.paragraphs:
+                # Extract alignment from first paragraph with alignment set
+                if paragraph.alignment is not None and alignment == "left":
+                    alignment = self.ALIGNMENT_MAP.get(paragraph.alignment, "left")
+
+                for run in paragraph.runs:
+                    font = run.font
+                    color = self._extract_font_color(font)
+                    text_run = TextRun(
+                        text=run.text,
+                        font_family=font.name or "Calibri",
+                        font_size=int(font.size.pt * 100) if font.size else 1400,
+                        bold=bool(font.bold) if font.bold is not None else False,
+                        italic=bool(font.italic) if font.italic is not None else False,
+                        underline=bool(font.underline) if font.underline is not None else False,
+                        color=color,
+                    )
+                    runs.append(text_run)
+        except Exception:
+            pass
 
         return TextContent(
             runs=runs,
-            alignment="left",  # TODO: Extract alignment
+            alignment=alignment,
         )
+
+    def _extract_font_color(self, font: Any) -> str:
+        """Extract color from font object safely.
+
+        Args:
+            font: The python-pptx Font object.
+
+        Returns:
+            Hex color string.
+        """
+        try:
+            if font.color is None:
+                return "#000000"
+
+            # Try RGB first
+            try:
+                if font.color.rgb is not None:
+                    return f"#{font.color.rgb}"
+            except (AttributeError, TypeError):
+                pass
+
+            # Try theme color
+            try:
+                if font.color.theme_color is not None:
+                    return self.style_extractor._theme_color_to_hex(font.color.theme_color)
+            except (AttributeError, TypeError):
+                pass
+
+        except Exception:
+            pass
+
+        return "#000000"
 
     def _rgb_to_hex(self, rgb: Any) -> str:
         """Convert RGB color to hex string.

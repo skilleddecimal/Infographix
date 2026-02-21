@@ -9,6 +9,7 @@ from pptx.slide import Slide
 from backend.dsl.schema import Canvas, SlideMetadata, SlideScene, ThemeColors
 from backend.parser.shape_extractor import ShapeExtractor
 from backend.parser.style_extractor import StyleExtractor
+from backend.parser.theme_parser import ThemeParser
 
 
 class PPTXReader:
@@ -18,6 +19,7 @@ class PPTXReader:
         """Initialize the PPTX reader."""
         self.shape_extractor = ShapeExtractor()
         self.style_extractor = StyleExtractor()
+        self.theme_parser = ThemeParser()
 
     def read(self, source: Union[str, Path, BinaryIO]) -> list[SlideScene]:
         """Read a PPTX file and extract scene graphs for all slides.
@@ -96,14 +98,16 @@ class PPTXReader:
     def _extract_theme(self, prs: Presentation) -> ThemeColors:
         """Extract theme colors from presentation.
 
+        Uses ThemeParser to extract colors from the slide master's
+        color scheme XML.
+
         Args:
             prs: The Presentation object.
 
         Returns:
             ThemeColors with the theme palette.
         """
-        # Default theme colors - in production we'd extract from prs.slide_master.theme
-        return ThemeColors()
+        return self.theme_parser.extract_theme(prs)
 
     def _extract_notes(self, slide: Slide) -> str | None:
         """Extract speaker notes from a slide.

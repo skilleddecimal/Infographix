@@ -1,23 +1,36 @@
-"""Extract visual styles from PowerPoint shapes."""
+"""Extract visual styles from PowerPoint shapes.
+
+Includes fill, stroke, and effects (shadow, glow, reflection, bevel, soft edges).
+"""
 
 from typing import Any
 
 from pptx.dml.color import RGBColor
-from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR
+from pptx.enum.dml import MSO_LINE_DASH_STYLE, MSO_THEME_COLOR, MSO_FILL_TYPE
 from pptx.slide import Slide
 
 from backend.dsl.schema import (
+    Bevel,
     DashStyle,
     Effects,
     Fill,
+    Glow,
     GradientFill,
     GradientStop,
     GradientType,
     NoFill,
+    Reflection,
     Shadow,
     SolidFill,
     Stroke,
 )
+
+
+# XML namespaces for Office Open XML
+NAMESPACES = {
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
+}
 
 
 class StyleExtractor:
@@ -54,12 +67,16 @@ class StyleExtractor:
             return NoFill()
 
         # Solid fill
-        if hasattr(fill, "solid") and fill.type and "SOLID" in str(fill.type):
+        if fill_type == MSO_FILL_TYPE.SOLID:
             return self._extract_solid_fill(fill)
 
         # Gradient fill
-        if hasattr(fill, "gradient_stops") and fill.type and "GRADIENT" in str(fill.type):
+        if fill_type == MSO_FILL_TYPE.GRADIENT:
             return self._extract_gradient_fill(fill)
+
+        # Patterned or other fills - treat as solid with default
+        if fill_type == MSO_FILL_TYPE.PATTERNED:
+            return self._extract_solid_fill(fill)
 
         return NoFill()
 
@@ -76,14 +93,53 @@ class StyleExtractor:
         alpha = 1.0
 
         try:
-            if fill.fore_color and fill.fore_color.rgb:
-                color = self._rgb_to_hex(fill.fore_color.rgb)
-            elif fill.fore_color and fill.fore_color.theme_color:
-                color = self._theme_color_to_hex(fill.fore_color.theme_color)
+            if fill.fore_color:
+                color = self._extract_color(fill.fore_color)
         except Exception:
             pass
 
         return SolidFill(color=color, alpha=alpha)
+
+    def _extract_color(self, color_obj: Any) -> str:
+        """Extract color from any python-pptx color object.
+
+        Handles RGBColor, SchemeColor, PrstColor, NoneColor, etc.
+
+        Args:
+            color_obj: The color object from python-pptx.
+
+        Returns:
+            Hex color string.
+        """
+        if color_obj is None:
+            return "#0D9488"
+
+        # Try to get RGB directly
+        try:
+            rgb = color_obj.rgb
+            if rgb is not None:
+                return self._rgb_to_hex(rgb)
+        except (AttributeError, TypeError):
+            pass
+
+        # Try theme color
+        try:
+            theme_color = color_obj.theme_color
+            if theme_color is not None:
+                return self._theme_color_to_hex(theme_color)
+        except (AttributeError, TypeError):
+            pass
+
+        # Try brightness-adjusted theme color
+        try:
+            if hasattr(color_obj, "type") and "SCHEME" in str(color_obj.type):
+                # It's a scheme color, return a default based on context
+                return "#0D9488"
+        except (AttributeError, TypeError):
+            pass
+
+        # Default fallback
+        return "#0D9488"
 
     def _extract_gradient_fill(self, fill: Any) -> GradientFill:
         """Extract gradient fill properties.
@@ -105,8 +161,8 @@ class StyleExtractor:
                 for stop in fill.gradient_stops:
                     position = stop.position if hasattr(stop, "position") else 0.0
                     color = "#0D9488"
-                    if hasattr(stop, "color") and stop.color.rgb:
-                        color = self._rgb_to_hex(stop.color.rgb)
+                    if hasattr(stop, "color"):
+                        color = self._extract_color(stop.color)
 
                     stops.append(GradientStop(position=position, color=color))
         except Exception:
@@ -146,8 +202,8 @@ class StyleExtractor:
                 return None
 
             color = "#000000"
-            if line.color and line.color.rgb:
-                color = self._rgb_to_hex(line.color.rgb)
+            if line.color:
+                color = self._extract_color(line.color)
 
             width = 12700  # 1pt default
             if line.width:
@@ -168,15 +224,22 @@ class StyleExtractor:
     def extract_effects(self, shape: Any) -> Effects:
         """Extract visual effects from a shape.
 
+        Extracts shadow, glow, reflection, bevel, and soft edges from
+        the shape's effect list XML.
+
         Args:
             shape: The python-pptx shape object.
 
         Returns:
-            Effects object.
+            Effects object with all detected effects.
         """
         shadow = None
+        glow = None
+        reflection = None
+        bevel = None
+        soft_edges = None
 
-        # Try to extract shadow
+        # Try to extract shadow from python-pptx API
         try:
             if hasattr(shape, "shadow") and shape.shadow:
                 shadow_obj = shape.shadow
@@ -192,7 +255,254 @@ class StyleExtractor:
         except Exception:
             pass
 
-        return Effects(shadow=shadow)
+        # Extract additional effects from XML
+        try:
+            element = shape._element
+
+            # Find effect list in shape properties
+            sp_pr = element.find(".//p:spPr", NAMESPACES)
+            if sp_pr is None:
+                sp_pr = element.find(".//a:spPr", NAMESPACES)
+
+            if sp_pr is not None:
+                # Extract effect list <a:effectLst>
+                effect_lst = sp_pr.find("a:effectLst", NAMESPACES)
+                if effect_lst is not None:
+                    glow = self._extract_glow(effect_lst)
+                    reflection = self._extract_reflection(effect_lst)
+                    soft_edges = self._extract_soft_edges(effect_lst)
+
+                    # Shadow from XML if not already extracted
+                    if shadow is None:
+                        shadow = self._extract_shadow_from_xml(effect_lst)
+
+                # Extract 3D effects for bevel
+                sp3d = sp_pr.find("a:sp3d", NAMESPACES)
+                if sp3d is not None:
+                    bevel = self._extract_bevel(sp3d)
+
+        except (AttributeError, TypeError):
+            pass
+
+        return Effects(
+            shadow=shadow,
+            glow=glow,
+            reflection=reflection,
+            bevel=bevel,
+            soft_edges=soft_edges,
+        )
+
+    def _extract_glow(self, effect_lst: Any) -> Glow | None:
+        """Extract glow effect from effect list.
+
+        XML structure:
+            <a:glow rad="63500">
+                <a:srgbClr val="FF0000">
+                    <a:alpha val="60000"/>
+                </a:srgbClr>
+            </a:glow>
+
+        Args:
+            effect_lst: The <a:effectLst> XML element.
+
+        Returns:
+            Glow object or None.
+        """
+        glow_elem = effect_lst.find("a:glow", NAMESPACES)
+        if glow_elem is None:
+            return None
+
+        # Extract radius (in EMUs)
+        radius = int(glow_elem.get("rad", "63500"))
+
+        # Extract color
+        color = "#FFFF00"  # Default glow color (yellow)
+        alpha = 0.6
+
+        srgb = glow_elem.find("a:srgbClr", NAMESPACES)
+        if srgb is not None:
+            color = f"#{srgb.get('val', 'FFFF00')}"
+
+            # Check for alpha modifier
+            alpha_elem = srgb.find("a:alpha", NAMESPACES)
+            if alpha_elem is not None:
+                alpha_val = alpha_elem.get("val", "60000")
+                alpha = float(alpha_val) / 100000.0
+
+        return Glow(color=color, alpha=alpha, radius=radius)
+
+    def _extract_reflection(self, effect_lst: Any) -> Reflection | None:
+        """Extract reflection effect from effect list.
+
+        XML structure:
+            <a:reflection blurRad="6350" stA="52000" endA="300"
+                          dist="0" dir="5400000" sy="-100000"
+                          algn="bl" rotWithShape="0"/>
+
+        Args:
+            effect_lst: The <a:effectLst> XML element.
+
+        Returns:
+            Reflection object or None.
+        """
+        refl_elem = effect_lst.find("a:reflection", NAMESPACES)
+        if refl_elem is None:
+            return None
+
+        # Extract blur radius
+        blur_radius = int(refl_elem.get("blurRad", "0"))
+
+        # Extract start and end alpha (in 100,000ths)
+        start_alpha_raw = float(refl_elem.get("stA", "50000"))
+        end_alpha_raw = float(refl_elem.get("endA", "0"))
+        start_alpha = start_alpha_raw / 100000.0
+        end_alpha = end_alpha_raw / 100000.0
+
+        # Extract distance
+        distance = int(refl_elem.get("dist", "0"))
+
+        # Extract direction (in 60,000ths of a degree)
+        dir_raw = float(refl_elem.get("dir", "5400000"))
+        direction = dir_raw / 60000.0
+
+        # Extract scale (in 100,000ths, negative for reflection)
+        sy_raw = float(refl_elem.get("sy", "-100000"))
+        scale_y = sy_raw / 100000.0
+
+        sx_raw = float(refl_elem.get("sx", "100000"))
+        scale_x = sx_raw / 100000.0
+
+        return Reflection(
+            blur_radius=blur_radius,
+            start_alpha=start_alpha,
+            end_alpha=end_alpha,
+            distance=distance,
+            direction=direction,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
+
+    def _extract_soft_edges(self, effect_lst: Any) -> int | None:
+        """Extract soft edge effect from effect list.
+
+        XML structure:
+            <a:softEdge rad="63500"/>
+
+        Args:
+            effect_lst: The <a:effectLst> XML element.
+
+        Returns:
+            Soft edge radius in EMUs or None.
+        """
+        soft_elem = effect_lst.find("a:softEdge", NAMESPACES)
+        if soft_elem is None:
+            return None
+
+        return int(soft_elem.get("rad", "0"))
+
+    def _extract_shadow_from_xml(self, effect_lst: Any) -> Shadow | None:
+        """Extract shadow effect from effect list XML.
+
+        XML structure:
+            <a:outerShdw blurRad="50800" dist="38100" dir="2700000"
+                         algn="tl" rotWithShape="0">
+                <a:srgbClr val="000000">
+                    <a:alpha val="50000"/>
+                </a:srgbClr>
+            </a:outerShdw>
+
+        Args:
+            effect_lst: The <a:effectLst> XML element.
+
+        Returns:
+            Shadow object or None.
+        """
+        # Try outer shadow first
+        shadow_elem = effect_lst.find("a:outerShdw", NAMESPACES)
+        shadow_type = "outer"
+
+        if shadow_elem is None:
+            shadow_elem = effect_lst.find("a:innerShdw", NAMESPACES)
+            shadow_type = "inner"
+
+        if shadow_elem is None:
+            return None
+
+        # Extract properties
+        blur_radius = int(shadow_elem.get("blurRad", "50800"))
+        distance = int(shadow_elem.get("dist", "38100"))
+
+        # Direction in 60,000ths of a degree
+        dir_raw = float(shadow_elem.get("dir", "2700000"))
+        angle = dir_raw / 60000.0
+
+        # Extract color
+        color = "#000000"
+        alpha = 0.5
+
+        srgb = shadow_elem.find("a:srgbClr", NAMESPACES)
+        if srgb is not None:
+            color = f"#{srgb.get('val', '000000')}"
+
+            alpha_elem = srgb.find("a:alpha", NAMESPACES)
+            if alpha_elem is not None:
+                alpha_val = alpha_elem.get("val", "50000")
+                alpha = float(alpha_val) / 100000.0
+
+        return Shadow(
+            type=shadow_type,
+            color=color,
+            alpha=alpha,
+            blur_radius=blur_radius,
+            distance=distance,
+            angle=angle,
+        )
+
+    def _extract_bevel(self, sp3d: Any) -> Bevel | None:
+        """Extract bevel effect from 3D shape properties.
+
+        XML structure:
+            <a:sp3d>
+                <a:bevelT w="76200" h="76200" prst="relaxedInset"/>
+            </a:sp3d>
+
+        Args:
+            sp3d: The <a:sp3d> XML element.
+
+        Returns:
+            Bevel object or None.
+        """
+        bevel_t = sp3d.find("a:bevelT", NAMESPACES)
+        if bevel_t is None:
+            return None
+
+        # Extract dimensions
+        width = int(bevel_t.get("w", "76200"))
+        height = int(bevel_t.get("h", "76200"))
+
+        # Extract preset type
+        preset = bevel_t.get("prst", "relaxedInset")
+
+        # Map preset to our supported types
+        preset_map = {
+            "relaxedInset": "relaxedInset",
+            "circle": "circle",
+            "slope": "slope",
+            "cross": "cross",
+            "angle": "angle",
+            "softRound": "softRound",
+            # Map other presets to closest match
+            "coolSlant": "slope",
+            "convex": "circle",
+            "divot": "angle",
+            "riblet": "cross",
+            "hardEdge": "angle",
+            "artDeco": "slope",
+        }
+
+        bevel_type = preset_map.get(preset, "relaxedInset")
+
+        return Bevel(type=bevel_type, width=width, height=height)
 
     def extract_background(self, slide: Slide) -> Fill:
         """Extract slide background fill.
