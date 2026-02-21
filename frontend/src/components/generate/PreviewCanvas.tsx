@@ -17,8 +17,10 @@ export function PreviewCanvas({ dsl, isLoading, error }: PreviewCanvasProps) {
       shapes?: Array<{
         id: string
         bbox?: { x: number; y: number; width: number; height: number }
-        fill?: { color?: string }
-        text?: { content?: string }
+        fill?: { color?: string; transparency?: number }
+        text?: { content?: string; runs?: Array<{ text: string }> }
+        auto_shape_type?: string
+        type?: string
       }>
       theme?: Record<string, string>
     }
@@ -26,6 +28,12 @@ export function PreviewCanvas({ dsl, isLoading, error }: PreviewCanvasProps) {
     const canvas = scene.canvas || { width: 960, height: 540, background: '#FFFFFF' }
     const shapes = scene.shapes || []
     const theme = scene.theme || {}
+
+    // Calculate proportional sizes based on canvas dimensions
+    // EMU coordinates are typically ~12 million, standard is ~960
+    const scaleFactor = Math.max(canvas.width, canvas.height) / 1000
+    const baseFontSize = 14 * scaleFactor
+    const baseCornerRadius = 4 * scaleFactor
 
     const resolveColor = (color: string | undefined): string => {
       if (!color) return '#0D9488'
@@ -43,18 +51,64 @@ export function PreviewCanvas({ dsl, isLoading, error }: PreviewCanvasProps) {
         {shapes.map((shape) => {
           const bbox = shape.bbox || { x: 0, y: 0, width: 100, height: 50 }
           const fillColor = resolveColor(shape.fill?.color)
-          const textContent = shape.text?.content || ''
+          const opacity = shape.fill?.transparency ? 1 - shape.fill.transparency : 1
+          const textContent = shape.text?.content || shape.text?.runs?.[0]?.text || ''
+          const shapeType = shape.auto_shape_type || 'rect'
+
+          // Render shape based on type
+          const renderShape = () => {
+            switch (shapeType) {
+              case 'ellipse':
+                return (
+                  <ellipse
+                    cx={bbox.x + bbox.width / 2}
+                    cy={bbox.y + bbox.height / 2}
+                    rx={bbox.width / 2}
+                    ry={bbox.height / 2}
+                    fill={fillColor}
+                    fillOpacity={opacity}
+                  />
+                )
+              case 'roundRect':
+                return (
+                  <rect
+                    x={bbox.x}
+                    y={bbox.y}
+                    width={bbox.width}
+                    height={bbox.height}
+                    fill={fillColor}
+                    fillOpacity={opacity}
+                    rx={Math.min(bbox.width, bbox.height) * 0.08}
+                  />
+                )
+              case 'trapezoid':
+                // Render as polygon for funnel-like shapes
+                const topInset = bbox.width * 0.1
+                return (
+                  <polygon
+                    points={`${bbox.x + topInset},${bbox.y} ${bbox.x + bbox.width - topInset},${bbox.y} ${bbox.x + bbox.width},${bbox.y + bbox.height} ${bbox.x},${bbox.y + bbox.height}`}
+                    fill={fillColor}
+                    fillOpacity={opacity}
+                  />
+                )
+              default:
+                return (
+                  <rect
+                    x={bbox.x}
+                    y={bbox.y}
+                    width={bbox.width}
+                    height={bbox.height}
+                    fill={fillColor}
+                    fillOpacity={opacity}
+                    rx={baseCornerRadius}
+                  />
+                )
+            }
+          }
 
           return (
             <g key={shape.id}>
-              <rect
-                x={bbox.x}
-                y={bbox.y}
-                width={bbox.width}
-                height={bbox.height}
-                fill={fillColor}
-                rx={4}
-              />
+              {renderShape()}
               {textContent && (
                 <text
                   x={bbox.x + bbox.width / 2}
@@ -62,8 +116,9 @@ export function PreviewCanvas({ dsl, isLoading, error }: PreviewCanvasProps) {
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fill="white"
-                  fontSize={14}
+                  fontSize={baseFontSize}
                   fontFamily="Inter, sans-serif"
+                  fontWeight={500}
                 >
                   {textContent}
                 </text>
