@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(curl:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(netstat:*)",
+      "Bash(del test_funnel_styling.py analyze_output_pptx.py test_funnel_output_*.pptx)",
+      "Bash(taskkill //F //PID 46948)",
+      "Bash(timeout /t 8 /nobreak)",
+      "Bash(ping:*)",
+      "Bash(powershell -Command \"\\(Get-Item ''C:\\\\Users\\\\raymo\\\\mlbase\\\\Infographix\\\\backend\\\\engine\\\\pptx_renderer.py''\\).LastWriteTime = Get-Date\")",
+      "Bash(powershell:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(pip install:*)",
+      "Bash(dir \"C:\\\\Users\\\\raymo\\\\mlbase\\\\Infographix\\\\output\\\\debug_shapes.png\")",
+      "Bash(copy:*)",
+      "Bash(taskkill:*)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd icon system, smart connectors, visual effects, and semantic mapping\n\nPhase 1 - Icon System:\n- Add 105 SVG icons with semantic search in icons.json\n- Add IconLibrary with keyword indexing and similarity search\n\nPhase 2 - Smart Connector Routing:\n- Add ConnectorRouter with A* pathfinding and obstacle avoidance\n- Add orthogonal routing with waypoints support in positioned.py\n- Support for DIRECT, ORTHOGONAL, STEPPED, CURVED routing styles\n\nPhase 3 - Visual Effects:\n- Add GlowConfig, ReflectionConfig, SoftEdgeConfig in shape_effects.py\n- Add DrawingML XML generation for PowerPoint effects\n- Integrate effects into pptx_renderer.py\n\nPhase 4 - Semantic Metaphor System:\n- Add SemanticMapper with concept-to-color mapping\n- Add industry vocabularies for 8 industries\n- Integrate semantic guidance into LLM prompts\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(start test_sales_funnel.pptx)",
+      "Bash(timeout:*)",
+      "Bash(start http://localhost:5173)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(npm install)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)"
+    ]
+  }
+}
