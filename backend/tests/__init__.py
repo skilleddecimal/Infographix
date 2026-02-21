@@ -1,0 +1,1 @@
+"""Infographix backend tests."""

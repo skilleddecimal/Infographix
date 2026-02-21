@@ -1,114 +1,104 @@
-"""
-main.py — FastAPI application entry point for InfographAI.
+"""FastAPI application entry point."""
 
-Run with:
-    uvicorn backend.api.main:app --reload
-
-Or programmatically:
-    import uvicorn
-    uvicorn.run("backend.api.main:app", host="0.0.0.0", port=8000, reload=True)
-"""
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import get_settings
-from .routes import router
-from .schemas import HealthResponse
-
-
-# =============================================================================
-# APP CONFIGURATION
-# =============================================================================
-
-app = FastAPI(
-    title="InfographAI",
-    description="AI-powered infographic and diagram generation API",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+from backend.api.config import get_settings
+from backend.api.routes import api_router
+from backend.api.middleware import (
+    RateLimitMiddleware,
+    LoggingMiddleware,
+    SecurityHeadersMiddleware,
 )
-
-
-# =============================================================================
-# CORS MIDDLEWARE
-# =============================================================================
+from backend.api.middleware.rate_limit import RateLimitConfig
 
 settings = get_settings()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan handler for startup/shutdown events."""
+    # Startup
+    print(f"Starting {settings.app_name} v{settings.app_version}")
+    print(f"Environment: {settings.environment}")
+    print(f"Debug mode: {settings.debug}")
+
+    # Initialize database
+    from backend.db.base import init_db
+    init_db()
+
+    yield
+
+    # Shutdown
+    print("Shutting down...")
 
 
-# =============================================================================
-# ROUTES
-# =============================================================================
-
-app.include_router(router)
-
-
-@app.get("/", tags=["root"])
-async def root():
-    """Root endpoint with basic info."""
-    return {
-        "name": "InfographAI",
-        "version": "1.0.0",
-        "docs": "/docs",
-    }
-
-
-@app.get("/health", response_model=HealthResponse, tags=["health"])
-async def health():
-    """Health check endpoint."""
-    settings = get_settings()
-    return HealthResponse(
-        status="healthy",
-        version="1.0.0",
-        anthropic_configured=settings.has_anthropic_key,
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title=settings.app_name,
+        description="AI-Powered PowerPoint Infographic Generator",
+        version=settings.app_version,
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+        lifespan=lifespan,
     )
 
+    # Security headers middleware
+    app.add_middleware(SecurityHeadersMiddleware)
 
-# =============================================================================
-# STARTUP/SHUTDOWN EVENTS
-# =============================================================================
+    # Logging middleware
+    app.add_middleware(
+        LoggingMiddleware,
+        exclude_paths=["/health", "/ready"],
+    )
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize resources on startup."""
-    settings = get_settings()
+    # Rate limiting middleware
+    app.add_middleware(
+        RateLimitMiddleware,
+        config=RateLimitConfig(
+            requests_per_minute=60,
+            exempt_paths=["/health", "/ready", "/docs", "/redoc", "/openapi.json"],
+        ),
+    )
 
-    # Create output directory
-    import os
-    os.makedirs(settings.output_dir, exist_ok=True)
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-    print(f"InfographAI API starting...")
-    print(f"  Output directory: {settings.output_dir}")
-    print(f"  Anthropic API configured: {settings.has_anthropic_key}")
-    print(f"  CORS origins: {settings.cors_origins}")
+    # Include API routes
+    app.include_router(api_router, prefix=settings.api_prefix)
+
+    @app.get("/health")
+    async def health_check() -> dict[str, str]:
+        """Health check endpoint."""
+        return {
+            "status": "healthy",
+            "app": settings.app_name,
+            "version": settings.app_version,
+        }
+
+    return app
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown."""
-    print("InfographAI API shutting down...")
+# Create app instance
+app = create_app()
 
-
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
 
 if __name__ == "__main__":
     import uvicorn
 
-    settings = get_settings()
     uvicorn.run(
         "backend.api.main:app",
-        host=settings.host,
-        port=settings.port,
+        host="0.0.0.0",
+        port=8000,
         reload=settings.debug,
     )
