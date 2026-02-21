@@ -85,6 +85,19 @@ class User(Base):
     oauth_provider = Column(String(50), nullable=True)
     oauth_id = Column(String(255), nullable=True)
 
+    # Email verification
+    verification_token_hash = Column(String(255), nullable=True)
+    verification_token_expires_at = Column(DateTime, nullable=True)
+
+    # Password reset
+    reset_token_hash = Column(String(255), nullable=True)
+    reset_token_expires_at = Column(DateTime, nullable=True)
+
+    # 2FA (TOTP)
+    totp_secret = Column(String(32), nullable=True)  # Encrypted in production
+    totp_enabled = Column(Boolean, default=False)
+    totp_backup_codes = Column(JSON, nullable=True)  # List of hashed backup codes
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
