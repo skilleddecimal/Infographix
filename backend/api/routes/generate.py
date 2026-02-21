@@ -295,8 +295,11 @@ async def process_generation(
         db.commit()
 
         try:
-            # Run inference
-            engine = InferenceEngine(use_ml=False)  # Use fallbacks for now
+            # Run inference with trained ML models
+            engine = InferenceEngine(
+                models_dir="ml/models",
+                use_ml=True,
+            )
 
             result = engine.generate(
                 prompt=prompt,
