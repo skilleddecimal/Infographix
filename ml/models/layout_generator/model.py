@@ -202,6 +202,10 @@ class LayoutGenerator(nn.Module):
             shapes = self._generate_process_shapes(item_count, canvas_width, canvas_height)
         elif archetype == "cycle":
             shapes = self._generate_cycle_shapes(item_count, canvas_width, canvas_height)
+        elif archetype == "comparison":
+            shapes = self._generate_comparison_shapes(item_count, canvas_width, canvas_height)
+        elif archetype == "venn":
+            shapes = self._generate_venn_shapes(item_count, canvas_width, canvas_height)
         else:
             shapes = self._generate_process_shapes(item_count, canvas_width, canvas_height)
 
@@ -360,6 +364,118 @@ class LayoutGenerator(nn.Module):
                 "auto_shape_type": "ellipse",
                 "bbox": {"x": x, "y": y, "width": node_size, "height": node_size},
                 "fill": {"type": "solid", "color": "accent1"},
+            })
+
+        return shapes
+
+    def _generate_comparison_shapes(
+        self,
+        count: int,
+        canvas_width: int,
+        canvas_height: int,
+    ) -> list[dict]:
+        """Generate comparison layout shapes (side-by-side columns)."""
+        shapes = []
+        margin = canvas_width // 15
+        gap = canvas_width // 20  # Gap between columns
+
+        # For comparison, we typically have 2 main columns (left vs right)
+        num_columns = min(count, 2) if count <= 2 else 2
+        column_width = (canvas_width - 2 * margin - gap) // num_columns
+        column_height = canvas_height - 2 * margin
+
+        # Create header for each side
+        header_height = column_height // 8
+
+        for i in range(num_columns):
+            x = margin + i * (column_width + gap)
+
+            # Header shape
+            shapes.append({
+                "id": f"comparison_header_{i}",
+                "type": "autoShape",
+                "auto_shape_type": "roundRect",
+                "bbox": {"x": x, "y": margin, "width": column_width, "height": header_height},
+                "fill": {"type": "solid", "color": f"accent{i + 1}"},
+            })
+
+            # Content area
+            content_y = margin + header_height + margin // 4
+            content_height = column_height - header_height - margin // 4
+            shapes.append({
+                "id": f"comparison_content_{i}",
+                "type": "autoShape",
+                "auto_shape_type": "rect",
+                "bbox": {"x": x, "y": content_y, "width": column_width, "height": content_height},
+                "fill": {"type": "solid", "color": f"accent{i + 3}"},
+            })
+
+        # Add VS indicator in the middle
+        vs_size = canvas_height // 8
+        shapes.append({
+            "id": "comparison_vs",
+            "type": "autoShape",
+            "auto_shape_type": "ellipse",
+            "bbox": {
+                "x": canvas_width // 2 - vs_size // 2,
+                "y": canvas_height // 2 - vs_size // 2,
+                "width": vs_size,
+                "height": vs_size,
+            },
+            "fill": {"type": "solid", "color": "accent6"},
+            "text": {"runs": [{"text": "VS"}]},
+        })
+
+        return shapes
+
+    def _generate_venn_shapes(
+        self,
+        count: int,
+        canvas_width: int,
+        canvas_height: int,
+    ) -> list[dict]:
+        """Generate Venn diagram shapes (overlapping circles)."""
+        import math
+
+        shapes = []
+        center_x = canvas_width // 2
+        center_y = canvas_height // 2
+
+        # Circle size and overlap
+        circle_radius = min(canvas_width, canvas_height) // 4
+        overlap = circle_radius // 2  # How much circles overlap
+
+        if count == 2:
+            # Two circles side by side with overlap
+            offset = circle_radius - overlap // 2
+            positions = [
+                (center_x - offset, center_y),
+                (center_x + offset, center_y),
+            ]
+        elif count >= 3:
+            # Three circles in triangle formation
+            radius_from_center = circle_radius - overlap
+            positions = []
+            for i in range(min(count, 3)):
+                angle = (2 * math.pi * i / 3) - math.pi / 2
+                x = int(center_x + radius_from_center * math.cos(angle))
+                y = int(center_y + radius_from_center * math.sin(angle))
+                positions.append((x, y))
+        else:
+            positions = [(center_x, center_y)]
+
+        for i, (x, y) in enumerate(positions):
+            shapes.append({
+                "id": f"venn_circle_{i}",
+                "type": "autoShape",
+                "auto_shape_type": "ellipse",
+                "bbox": {
+                    "x": x - circle_radius,
+                    "y": y - circle_radius,
+                    "width": circle_radius * 2,
+                    "height": circle_radius * 2,
+                },
+                "fill": {"type": "solid", "color": f"accent{i + 1}", "transparency": 0.5},
             })
 
         return shapes

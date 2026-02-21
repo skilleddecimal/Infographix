@@ -75,12 +75,18 @@ class InferenceEngine:
         self._layout_generator = None
         self._style_recommender = None
 
+    def _get_model_path(self, model_name: str) -> Path:
+        """Get model path, checking for 'trained' subdirectory."""
+        base_path = self.models_dir / model_name
+        trained_path = base_path / "trained"
+        return trained_path if trained_path.exists() else base_path
+
     @property
     def intent_classifier(self) -> IntentClassifierInference:
         """Get intent classifier inference wrapper."""
         if self._intent_classifier is None:
             self._intent_classifier = IntentClassifierInference(
-                model_path=self.models_dir / "intent_classifier"
+                model_path=self._get_model_path("intent_classifier")
             )
         return self._intent_classifier
 
@@ -89,7 +95,7 @@ class InferenceEngine:
         """Get layout generator inference wrapper."""
         if self._layout_generator is None:
             self._layout_generator = LayoutGeneratorInference(
-                model_path=self.models_dir / "layout_generator"
+                model_path=self._get_model_path("layout_generator")
             )
         return self._layout_generator
 
@@ -98,7 +104,7 @@ class InferenceEngine:
         """Get style recommender inference wrapper."""
         if self._style_recommender is None:
             self._style_recommender = StyleRecommenderInference(
-                model_path=self.models_dir / "style_recommender"
+                model_path=self._get_model_path("style_recommender")
             )
         return self._style_recommender
 
