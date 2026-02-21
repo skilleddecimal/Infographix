@@ -9,11 +9,14 @@ from pptx.slide import Slide
 from pptx.util import Emu, Pt
 
 from backend.dsl.schema import (
+    Bevel,
     DashStyle,
     Effects,
     Fill,
+    Glow,
     GradientFill,
     NoFill,
+    Reflection,
     Shadow,
     SolidFill,
     Stroke,
@@ -143,8 +146,17 @@ class StyleRenderer:
         if effects.shadow:
             self._apply_shadow(pptx_shape, effects.shadow)
 
-        # Note: Glow, reflection, bevel require XML manipulation
-        # which is more complex. Adding shadow support first.
+        if effects.glow:
+            self._apply_glow(pptx_shape, effects.glow)
+
+        if effects.reflection:
+            self._apply_reflection(pptx_shape, effects.reflection)
+
+        if effects.bevel:
+            self._apply_bevel(pptx_shape, effects.bevel)
+
+        if effects.soft_edges:
+            self._apply_soft_edges(pptx_shape, effects.soft_edges)
 
     def _apply_shadow(self, pptx_shape: Any, shadow: Shadow) -> None:
         """Apply shadow effect to a shape.
@@ -192,6 +204,149 @@ class StyleRenderer:
 
         except Exception:
             # Shadow application failed, continue without it
+            pass
+
+    def _apply_glow(self, pptx_shape: Any, glow: Glow) -> None:
+        """Apply glow effect to a shape.
+
+        Args:
+            pptx_shape: The python-pptx shape object.
+            glow: The glow specification.
+        """
+        try:
+            from lxml import etree
+
+            sp = pptx_shape._element
+            spPr = sp.find(qn("p:spPr"))
+            if spPr is None:
+                return
+
+            # Create effectLst if it doesn't exist
+            effectLst = spPr.find(qn("a:effectLst"))
+            if effectLst is None:
+                effectLst = etree.SubElement(spPr, qn("a:effectLst"))
+
+            # Remove existing glow
+            for existing in effectLst.findall(qn("a:glow")):
+                effectLst.remove(existing)
+
+            # Add new glow
+            glow_elem = etree.SubElement(effectLst, qn("a:glow"))
+            glow_elem.set("rad", str(glow.radius))
+
+            # Set glow color with alpha
+            srgbClr = etree.SubElement(glow_elem, qn("a:srgbClr"))
+            color_hex = glow.color.lstrip("#")
+            srgbClr.set("val", color_hex)
+
+            # Add alpha
+            alpha = etree.SubElement(srgbClr, qn("a:alpha"))
+            alpha.set("val", str(int(glow.alpha * 100000)))
+
+        except Exception:
+            pass
+
+    def _apply_reflection(self, pptx_shape: Any, reflection: Reflection) -> None:
+        """Apply reflection effect to a shape.
+
+        Args:
+            pptx_shape: The python-pptx shape object.
+            reflection: The reflection specification.
+        """
+        try:
+            from lxml import etree
+
+            sp = pptx_shape._element
+            spPr = sp.find(qn("p:spPr"))
+            if spPr is None:
+                return
+
+            # Create effectLst if it doesn't exist
+            effectLst = spPr.find(qn("a:effectLst"))
+            if effectLst is None:
+                effectLst = etree.SubElement(spPr, qn("a:effectLst"))
+
+            # Remove existing reflection
+            for existing in effectLst.findall(qn("a:reflection")):
+                effectLst.remove(existing)
+
+            # Add new reflection
+            refl = etree.SubElement(effectLst, qn("a:reflection"))
+            refl.set("blurRad", str(reflection.blur_radius))
+            refl.set("stA", str(int(reflection.start_alpha * 100000)))
+            refl.set("endA", str(int(reflection.end_alpha * 100000)))
+            refl.set("dist", str(reflection.distance))
+            refl.set("dir", str(int(reflection.direction * 60000)))
+            refl.set("sx", str(int(reflection.scale_x * 100000)))
+            refl.set("sy", str(int(reflection.scale_y * 100000)))
+            refl.set("algn", "bl")
+            refl.set("rotWithShape", "0")
+
+        except Exception:
+            pass
+
+    def _apply_bevel(self, pptx_shape: Any, bevel: Bevel) -> None:
+        """Apply 3D bevel effect to a shape.
+
+        Args:
+            pptx_shape: The python-pptx shape object.
+            bevel: The bevel specification.
+        """
+        try:
+            from lxml import etree
+
+            sp = pptx_shape._element
+            spPr = sp.find(qn("p:spPr"))
+            if spPr is None:
+                return
+
+            # Create sp3d if it doesn't exist
+            sp3d = spPr.find(qn("a:sp3d"))
+            if sp3d is None:
+                sp3d = etree.SubElement(spPr, qn("a:sp3d"))
+
+            # Remove existing bevel
+            for existing in sp3d.findall(qn("a:bevelT")):
+                sp3d.remove(existing)
+
+            # Add new bevel
+            bevelT = etree.SubElement(sp3d, qn("a:bevelT"))
+            bevelT.set("w", str(bevel.width))
+            bevelT.set("h", str(bevel.height))
+            bevelT.set("prst", bevel.type)
+
+        except Exception:
+            pass
+
+    def _apply_soft_edges(self, pptx_shape: Any, radius: int) -> None:
+        """Apply soft edges effect to a shape.
+
+        Args:
+            pptx_shape: The python-pptx shape object.
+            radius: Soft edge radius in EMUs.
+        """
+        try:
+            from lxml import etree
+
+            sp = pptx_shape._element
+            spPr = sp.find(qn("p:spPr"))
+            if spPr is None:
+                return
+
+            # Create effectLst if it doesn't exist
+            effectLst = spPr.find(qn("a:effectLst"))
+            if effectLst is None:
+                effectLst = etree.SubElement(spPr, qn("a:effectLst"))
+
+            # Remove existing soft edges
+            for existing in effectLst.findall(qn("a:softEdge")):
+                effectLst.remove(existing)
+
+            # Add new soft edges
+            softEdge = etree.SubElement(effectLst, qn("a:softEdge"))
+            softEdge.set("rad", str(radius))
+
+        except Exception:
             pass
 
     def apply_background(self, slide: Slide, fill: Fill) -> None:

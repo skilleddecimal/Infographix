@@ -5,6 +5,7 @@ from pptx.slide import Slide
 from pptx.util import Emu
 
 from backend.dsl.schema import Shape, ShapeType, ThemeColors
+from backend.renderer.path_renderer import PathRenderer, apply_transform_to_shape
 from backend.renderer.style_renderer import StyleRenderer
 from backend.renderer.text_renderer import TextRenderer
 
@@ -95,6 +96,7 @@ class ShapeRenderer:
         """Initialize the shape renderer."""
         self.style_renderer = StyleRenderer()
         self.text_renderer = TextRenderer()
+        self.path_renderer = PathRenderer()
 
     def render(self, slide: Slide, shape: Shape, theme: ThemeColors) -> None:
         """Render a shape to a slide.
@@ -143,9 +145,8 @@ class ShapeRenderer:
             Emu(shape.bbox.height),
         )
 
-        # Apply rotation
-        if shape.transform.rotation != 0:
-            pptx_shape.rotation = shape.transform.rotation
+        # Apply transform (rotation, flip_h, flip_v)
+        apply_transform_to_shape(pptx_shape, shape)
 
         # Apply fill
         self.style_renderer.apply_fill(pptx_shape, shape.fill, theme)
@@ -185,9 +186,8 @@ class ShapeRenderer:
             Emu(shape.bbox.height),
         )
 
-        # Apply rotation
-        if shape.transform.rotation != 0:
-            text_box.rotation = shape.transform.rotation
+        # Apply transform (rotation, flip_h, flip_v)
+        apply_transform_to_shape(text_box, shape)
 
         # Render text content
         if shape.text and shape.text.runs:
@@ -249,6 +249,8 @@ class ShapeRenderer:
     ) -> None:
         """Render a freeform path shape.
 
+        Uses PathRenderer for proper Bezier curve support.
+
         Args:
             slide: The PowerPoint slide.
             shape: The DSL freeform shape.
@@ -257,29 +259,17 @@ class ShapeRenderer:
         if not shape.path:
             return
 
-        # Build freeform from path commands
-        builder = slide.shapes.build_freeform(
-            Emu(shape.bbox.x),
-            Emu(shape.bbox.y),
-        )
-
-        for cmd in shape.path:
-            if cmd.type.value == "moveTo" and cmd.x is not None and cmd.y is not None:
-                # Move is implicit in build_freeform start
-                pass
-            elif cmd.type.value == "lineTo" and cmd.x is not None and cmd.y is not None:
-                builder.add_line_segments(
-                    [(Emu(cmd.x), Emu(cmd.y))],
-                    close=False,
-                )
-            elif cmd.type.value == "close":
-                pass  # Close handled at end
-
         try:
-            freeform = builder.convert_to_shape(
-                Emu(shape.bbox.x),
-                Emu(shape.bbox.y),
-            )
+            # Use PathRenderer for Bezier support
+            freeform = self.path_renderer.render_path(slide, shape)
+
+            if freeform is None:
+                # Fallback to rectangle if path rendering failed
+                self._render_auto_shape(slide, shape, theme)
+                return
+
+            # Apply transform (rotation, flip_h, flip_v)
+            apply_transform_to_shape(freeform, shape)
 
             # Apply fill
             self.style_renderer.apply_fill(freeform, shape.fill, theme)
@@ -287,6 +277,11 @@ class ShapeRenderer:
             # Apply stroke
             if shape.stroke:
                 self.style_renderer.apply_stroke(freeform, shape.stroke, theme)
+            else:
+                freeform.line.fill.background()
+
+            # Apply effects
+            self.style_renderer.apply_effects(freeform, shape.effects)
 
         except Exception:
             # Fallback to rectangle if freeform fails
