@@ -1,46 +1,77 @@
-version: '3.8'
+# Infographix Development Environment
+# Usage: docker-compose up -d
+
+version: "3.9"
 
 services:
+  # ==========================================================================
   # Backend API
+  # ==========================================================================
   backend:
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.backend
+      target: development
+    container_name: infographix-backend
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app/backend
+      - ./backend:/app/backend:cached
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
     environment:
-      - DEBUG=true
       - ENVIRONMENT=development
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEBUG=true
       - DATABASE_URL=postgresql://infographix:infographix@postgres:5432/infographix
       - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     depends_on:
-      - postgres
-      - redis
-    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - infographix-network
 
-  # Frontend
+  # ==========================================================================
+  # Frontend Application
+  # ==========================================================================
   frontend:
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.frontend
+      target: development
+    container_name: infographix-frontend
     ports:
       - "5173:5173"
     volumes:
-      - ./frontend:/app
+      - ./frontend:/app:cached
       - /app/node_modules
     environment:
-      - NODE_ENV=development
-    command: npm run dev -- --host
+      - VITE_API_URL=http://localhost:8000/api/v1
+      - VITE_WS_URL=ws://localhost:8000/api/v1/ws
+    depends_on:
+      - backend
+    networks:
+      - infographix-network
 
+  # ==========================================================================
   # PostgreSQL Database
+  # ==========================================================================
   postgres:
     image: postgres:16-alpine
+    container_name: infographix-postgres
     ports:
       - "5432:5432"
     environment:
@@ -48,16 +79,75 @@ services:
       - POSTGRES_PASSWORD=infographix
       - POSTGRES_DB=infographix
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infographix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - infographix-network
 
-  # Redis Cache
+  # ==========================================================================
+  # Redis Cache & Queue
+  # ==========================================================================
   redis:
     image: redis:7-alpine
+    container_name: infographix-redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - infographix-network
+
+  # ==========================================================================
+  # MinIO Object Storage (S3-compatible)
+  # ==========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: infographix-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - infographix-network
+
+  # ==========================================================================
+  # Mailhog (Email testing)
+  # ==========================================================================
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: infographix-mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    networks:
+      - infographix-network
+
+networks:
+  infographix-network:
+    driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  postgres-data:
+  redis-data:
+  minio-data:

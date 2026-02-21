@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  labels:
+    app.kubernetes.io/name: infographix
+    app.kubernetes.io/component: backend
+data:
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+  PYTHONUNBUFFERED: "1"
+  LOG_LEVEL: "INFO"
